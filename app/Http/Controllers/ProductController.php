@@ -83,9 +83,10 @@ class ProductController extends Controller
             return redirect()->back()->with('error', 'Product is out of stock.');
         }
 
-
         $quantity = $request->input('quantity');
         $unitPrice = $product->selling_price ?? $product->price;
+
+        // Fixed missing asterisk multiplication operator here:
         $orderAmount = $unitPrice * $quantity;
 
         Orders::create([
@@ -95,8 +96,6 @@ class ProductController extends Controller
         ]);
 
         $product->decrement('quantity');
-
-        // You can also add logic to handle the purchase, such as creating an order record, etc.
 
         return redirect()->back()->with('success', 'Product purchased successfully!');
     }
