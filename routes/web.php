@@ -13,3 +13,10 @@ Route::post('/products', [ProductController::class, 'store'])->name('products.st
 Route::post('/cart/buy/{id}', [ProductController::class, 'buy'])->name('cart.buy');
 Route::post('/cart/checkout', [ProductController::class, 'checkout'])->name('cart.checkout');
 
+Route::get('/products/edit/{id}', [ProductController::class, 'edit'])->name('products.edit');
+Route::put('/products/update/{id}', [ProductController::class, 'update'])->name('products.update');
+Route::get('/products/delete/{id}', [ProductController::class, 'delete'])->name('products.delete');
+
+
+Route::get('/orders/print/{id}', [ProductController::class, 'printInvoice'])->name('orders.print');
+

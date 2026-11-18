@@ -6,15 +6,17 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use App\Models\Product;
 use App\Models\Orders;
+use App\Models\OrderItem;
+use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
 
     public function index()
     {
-        $products = Product::latest()->paginate(10);
+        $products = Product::oldest()->paginate(10);
 
-        $orders = Orders::with('product')->latest()->get();
+        $orders = Orders::with('items.product')->oldest()->get();
         return view('home', compact('products', 'orders'));
     }
 
@@ -64,41 +66,85 @@ class ProductController extends Controller
 
     }
 
-    public function buy(Request $request, $id)
+
+    public function edit($id)
+    {
+        $product = Product::findOrFail($id);
+        return view('edit_product', compact('product'));
+    }
+
+    public function update(Request $request, $id)
     {
         $product = Product::findOrFail($id);
 
-        $minQty = $product->minimum_order_quantity ?? 1;
-        $maxQty = min($product->max_order_quantity ?? $product->quantity, $product->quantity);
-
-        Validator::make(request()->all(), [
-            'quantity' => "required|integer|min:$minQty|max:$maxQty",
+        $validatedData = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'code' => 'required|string|max:255|unique:products,code,' . $id,
+            'price' => 'required|numeric|min:0',
+            'selling_price' => 'nullable|numeric|min:0|lte:price',
+            'quantity' => 'required|integer|min:0',
+            'image' => 'nullable|image|max:2048',
+            'minimum_order_quantity' => 'nullable|integer|min:1',
+            'max_order_quantity' => 'nullable|integer|min:1|max:5',
         ])->validate();
 
-        if ($product->status !== 'active') {
-            return redirect()->back()->with('error', 'Product is not available for purchase.');
+        if ($request->hasFile('image')) {
+            // Optional: Delete old image if needed, then store new one
+            $imagePath = $request->file('image')->store('product_images', 'public');
+            $validatedData['image'] = $imagePath;
         }
 
-        if ($product->quantity <= 0) {
-            return redirect()->back()->with('error', 'Product is out of stock.');
-        }
+        $validatedData['discount'] = $validatedData['price'] - ($validatedData['selling_price'] ?? $validatedData['price']);
+        $validatedData['discount_in_percentage'] = $validatedData['price'] > 0 ? ($validatedData['discount'] / $validatedData['price']) * 100 : 0;
 
-        $quantity = $request->input('quantity');
-        $unitPrice = $product->selling_price ?? $product->price;
+        $product->update($validatedData);
 
-        // Fixed missing asterisk multiplication operator here:
-        $orderAmount = $unitPrice * $quantity;
-
-        Orders::create([
-            'product_id' => $product->id,
-            'quantity' => $quantity,
-            'order_amount' => $orderAmount,
-        ]);
-
-        $product->decrement('quantity');
-
-        return redirect()->back()->with('success', 'Product purchased successfully!');
+        return redirect()->route('home')->with('success', 'Product updated successfully!');
     }
+
+    public function delete($id)
+    {
+        $product = Product::findOrFail($id);
+        $product->delete();
+
+        return redirect()->route('home')->with('success', 'Product deleted successfully!');
+    }
+
+    // public function buy(Request $request, $id)
+    // {
+    //     $product = Product::findOrFail($id);
+
+    //     $minQty = $product->minimum_order_quantity ?? 1;
+    //     $maxQty = min($product->max_order_quantity ?? $product->quantity, $product->quantity);
+
+    //     Validator::make(request()->all(), [
+    //         'quantity' => "required|integer|min:$minQty|max:$maxQty",
+    //     ])->validate();
+
+    //     if ($product->status !== 'active') {
+    //         return redirect()->back()->with('error', 'Product is not available for purchase.');
+    //     }
+
+    //     if ($product->quantity <= 0) {
+    //         return redirect()->back()->with('error', 'Product is out of stock.');
+    //     }
+
+    //     $quantity = $request->input('quantity');
+    //     $unitPrice = $product->selling_price ?? $product->price;
+
+    //     // Fixed missing asterisk multiplication operator here:
+    //     $orderAmount = $unitPrice * $quantity;
+
+    //     Orders::create([
+    //         'product_id' => $product->id,
+    //         'quantity' => $quantity,
+    //         'order_amount' => $orderAmount,
+    //     ]);
+
+    //     $product->decrement('quantity');
+
+    //     return redirect()->back()->with('success', 'Product purchased successfully!');
+    // }
 
     public function checkout(Request $request)
     {
@@ -116,29 +162,62 @@ class ProductController extends Controller
             return redirect()->back()->with('error', 'Your order summary is empty.');
         }
 
-        foreach ($items as $item) {
-            $product = Product::find($item['product_id']);
+        // Use a database transaction to ensure data integrity
+        try {
+            DB::transaction(function () use ($request, $items) {
+                $grandTotal = 0;
+                $processedItems = [];
 
-            if (!$product || $product->quantity < $item['qty']) {
-                return redirect()->back()->with('error', 'Insufficient stock for one or more products.');
-            }
+                // 1. Validate stock and calculate total amount first
+                foreach ($items as $item) {
+                    $product = Product::find($item['product_id']);
 
-            $orderAmount = $item['unit'] * $item['qty'];
+                    if (!$product || $product->quantity < $item['qty']) {
+                        throw new \Exception('Insufficient stock for product: ' . ($product->name ?? 'Unknown'));
+                    }
 
-            // Save into the orders table
-            Orders::create([
-                'product_id' => $product->id,
-                'quantity' => $item['qty'],
-                'order_amount' => $orderAmount,
-                'customer_name' => $request->input('customer_name'),
-            'customer_email' => $request->input('customer_email'),
-            'customer_phone' => $request->input('customer_phone'),
-            ]);
+                    $itemTotal = $item['unit'] * $item['qty'];
+                    $grandTotal += $itemTotal;
 
-            // Decrement product stock by the exact ordered quantity
-            $product->decrement('quantity', $item['qty']);
+                    $processedItems[] = [
+                        'product' => $product,
+                        'qty' => $item['qty'],
+                        'total_amount' => $itemTotal
+                    ];
+                }
+
+                // 2. Create the Master Order record
+                $order = Orders::create([
+                    'total_amount' => $grandTotal,
+                    'customer_name' => $request->input('customer_name'),
+                    'customer_email' => $request->input('customer_email'),
+                    'customer_phone' => $request->input('customer_phone'),
+                ]);
+
+                // 3. Create Order Items and decrement stock
+                foreach ($processedItems as $pItem) {
+                    OrderItem::create([
+                        'order_id' => $order->id,
+                        'product_id' => $pItem['product']->id,
+                        'quantity' => $pItem['qty'],
+                        'total_amount' => $pItem['total_amount'],
+                    ]);
+
+                    $pItem['product']->decrement('quantity', $pItem['qty']);
+                }
+            });
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', $e->getMessage());
         }
 
-        return redirect()->back()->with('success', 'Orders placed and saved to database successfully!');
+        return redirect()->back()->with('success', 'Order placed successfully!');
+    }
+
+    public function printInvoice($id)
+    {
+        $order = Orders::with('items.product')->findOrFail($id);
+
+        return view('print_invoice', compact('order'));
     }
 }

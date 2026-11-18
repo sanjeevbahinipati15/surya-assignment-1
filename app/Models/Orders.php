@@ -3,22 +3,19 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Orders extends Model
 {
-    protected $table = 'orders';
-
     protected $fillable = [
-        'product_id',
-        'quantity',
-        'order_amount',
+        'total_amount',
         'customer_name',
-    'customer_email',
-    'customer_phone',
+        'customer_email',
+        'customer_phone',
     ];
 
-    public function product()
+    public function items(): HasMany
     {
-        return $this->belongsTo(Product::class, 'product_id');
+        return $this->hasMany(OrderItem::class, 'order_id');
     }
 }

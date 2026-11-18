@@ -132,8 +132,11 @@
                                             </span>
                                         </td>
                                         <td>
-                                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addToOrderSummary({{ $product->id }}, '{{ $product->name }}', {{ $product->selling_price ?? $product->price }}, {{ $product->minimum_order_quantity ?? 1 }}, {{ min($product->max_order_quantity ?? 5, $product->quantity) }}, {{ $product->quantity }})">Add</button>
-                                        </td>
+    <a href="{{ route('products.edit', $product->id) }}" class="btn btn-sm btn-outline-warning mb-1">Edit</a>
+    <button type="button" class="btn btn-outline-primary btn-sm" onclick="addToOrderSummary({{ $product->id }}, '{{ $product->name }}', {{ $product->selling_price ?? $product->price }}, {{ $product->minimum_order_quantity ?? 1 }}, {{ min($product->max_order_quantity ?? 5, $product->quantity) }}, {{ $product->quantity }})">Add</button>
+    <a href="{{ route('products.delete', $product->id) }}" class="btn btn-sm btn-outline-danger mb-1">Delete</a>
+
+</td>
                                     </tr>
                                 @empty
                                     <tr>
@@ -213,30 +216,42 @@
                             <thead class="table-dark">
                                 <tr>
                                     <th>Order ID</th>
-                                    <th>Customer Name</th>
-                                    <th>Email</th>
-                                    <th>Phone</th>
-                                    <th>Product Name</th>
-                                    <th>Qty</th>
-                                    <th>Amount</th>
+                                    <th>Customer Info</th>
+                                    <th>Items Purchased (Qty × Name = Subtotal)</th>
+                                    <th>Grand Total</th>
                                     <th>Date</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @forelse ($orders as $order)
                                     <tr>
                                         <td>#{{ $order->id }}</td>
-                                        <td>{{ $order->customer_name }}</td>
-                                        <td>{{ $order->customer_email }}</td>
-                                        <td>{{ $order->customer_phone }}</td>
-                                        <td>{{ $order->product->name ?? 'Product Deleted' }}</td>
-                                        <td>{{ $order->quantity }}</td>
-                                        <td>{{ number_format($order->order_amount, 2) }}</td>
+                                        <td>
+                                            <strong>{{ $order->customer_name }}</strong><br>
+                                            <small class="text-muted">{{ $order->customer_email }} | {{ $order->customer_phone }}</small>
+                                        </td>
+                                        <td>
+                                            <ul class="list-unstyled mb-0">
+                                                @foreach ($order->items as $item)
+                                                    <li>
+                                                        {{ $item->quantity }}x {{ $item->product->name ?? 'Product Unlisted' }}
+                                                        <span class="text-muted">({{ number_format($item->total_amount, 2) }})</span>
+                                                    </li>
+                                                @endforeach
+                                            </ul>
+                                        </td>
+                                        <td class="fw-bold text-success">{{ number_format($order->total_amount, 2) }}</td>
                                         <td>{{ $order->created_at->format('Y-m-d H:i') }}</td>
+                                        <td>
+                                            <a href="{{ route('orders.print', $order->id) }}" target="_blank" class="btn btn-sm btn-outline-dark">
+                                                🖨️ Print
+                                            </a>
+                                        </td>
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td colspan="8" class="text-center text-muted">No purchase history found.</td>
+                                        <td colspan="5" class="text-center text-muted">No purchase history found.</td>
                                     </tr>
                                 @endforelse
                             </tbody>
